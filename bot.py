@@ -9,6 +9,11 @@ BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "TOKEN_BOT_ANDA")
 CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "CHAT_ID_ANDA")
 STATE_FILE = "state.json"
 
+# Menyamar sebagai Browser Chrome agar tidak diblokir Cloudflare Bybit
+HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+}
+
 # Aturan Logika Timeframe
 RULES = [
     {"interval": "15", "max_mins": 7, "name": "15 Menit"},
@@ -39,7 +44,18 @@ async def get_all_symbols(session):
     symbols = []
     try:
         async with session.get(url, params=params) as resp:
-            data = await resp.json()
+            # Jika status bukan 200 OK (misal diblokir)
+            if resp.status != 200:
+                print(f"Gagal akses API Bybit (Status {resp.status}). Diblokir?")
+                return []
+                
+            text_data = await resp.text()
+            try:
+                data = json.loads(text_data)
+            except json.JSONDecodeError:
+                print("Error: Bybit tidak mereturn JSON (kemungkinan diblokir Cloudflare).")
+                return []
+
             if data.get("retCode") == 0:
                 for item in data["result"]["list"]:
                     # Hanya ambil pair USDT yang statusnya sedang Trading
@@ -64,6 +80,8 @@ async def check_volume(session, symbol, rule, state, sem, alerts_queue):
         
         try:
             async with session.get(url, params=params) as resp:
+                if resp.status != 200:
+                    return False
                 data = await resp.json()
         except Exception:
             return False # Skip jika error koneksi
@@ -71,7 +89,7 @@ async def check_volume(session, symbol, rule, state, sem, alerts_queue):
         if not data or data.get("retCode") != 0:
             return False
 
-        klines = data["result"]["list"]
+        klines = data.get("result", {}).get("list", [])
         if len(klines) < 2:
             return False
 
@@ -127,7 +145,8 @@ async def main():
     state_updated = False
     alerts_queue = []
 
-    async with aiohttp.ClientSession() as session:
+    # Inject Headers Penyamaran ke seluruh request
+    async with aiohttp.ClientSession(headers=HEADERS) as session:
         # 2. Dapatkan semua koin
         symbols = await get_all_symbols(session)
         if not symbols:
@@ -160,8 +179,6 @@ async def main():
 
     # 6. Simpan state agar Github Actions tidak spam
     if state_updated:
-        # Clean up data lama (opsional) agar file json tidak bengkak
-        # (Di sini kita simpan apa adanya dulu karena file size teks sangat kecil)
         with open(STATE_FILE, "w") as f:
             json.dump(state, f)
         print("Data state.json berhasil diperbarui.")
