@@ -33,6 +33,10 @@ jobs:
       run: |
         git config --global user.name "GitHub Action Bot"
         git config --global user.email "action@github.com"
-        git add state.json
-        git commit -m "Update state.json [skip ci]" || echo "No changes to commit"
-        git push
+        if [ -f state.json ]; then
+          git add state.json
+          git commit -m "Update state.json [skip ci]" || echo "No changes to commit"
+          git push
+        else
+          echo "Tidak ada koin pumping, file state.json belum perlu dibuat. Skip commit."
+        fi
